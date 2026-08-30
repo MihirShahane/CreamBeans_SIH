@@ -13,7 +13,6 @@ Identifying likely hotspots for loosing objects and improving on it.
 ## Target Users
 - Students
 - Professors
--
 ## Features
 
 ### Implemented Features
@@ -75,6 +74,7 @@ src/
 - AI integration
 - Mobile app
 - Advanced analytics
+- NFC integration
 
 ## Team Members
 - Shaunak Kadam
