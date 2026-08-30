@@ -1,0 +1,3 @@
+# Cream Beans SIH 2026 Lost & Found - Database & Integration Dependencies
+pytest>=7.0.0
+pydantic>=2.0.0
