@@ -1,4 +1,4 @@
-Cream Beans — Smart Campus Lost & Found
+**Cream Beans — Smart Campus Lost & Found**
 Cream Beans is a smart Lost & Found platform designed for college campuses.
 
 The motive behind is simple: Eliminating the dependency on WhatsApp groups, notice boards and social media posts to find and report lost items across campuses.
