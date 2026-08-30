@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Union
 
-from database.models import User, Item, MatchResult, MatchDetails
+from database.models import User, Item, MatchResult, Claim, MatchDetails
 
 
 class DatabaseRepository:
@@ -38,6 +38,7 @@ class DatabaseRepository:
             name TEXT NOT NULL,
             email TEXT UNIQUE NOT NULL,
             phone TEXT,
+            is_admin INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         """)
@@ -71,6 +72,17 @@ class DatabaseRepository:
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS claims (
+            id TEXT PRIMARY KEY,
+            claimant_id TEXT NOT NULL REFERENCES users(id),
+            lost_item_id TEXT NOT NULL REFERENCES items(id),
+            found_item_id TEXT NOT NULL REFERENCES items(id),
+            match_id TEXT REFERENCES matches(id),
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
         self.conn.commit()
 
     # =========================================================================
@@ -82,12 +94,13 @@ class DatabaseRepository:
         now_str = datetime.now(timezone.utc).isoformat()
         if not user.created_at:
             user.created_at = now_str
+        is_admin_int = 1 if user.is_admin else 0
         cursor.execute(
             """
-            INSERT INTO users (id, name, email, phone, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO users (id, name, email, phone, is_admin, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (user.id, user.name, user.email, user.phone, user.created_at)
+            (user.id, user.name, user.email, user.phone, is_admin_int, user.created_at)
         )
         self.conn.commit()
         return user
@@ -95,7 +108,7 @@ class DatabaseRepository:
     def get_user_by_id(self, user_id: str) -> Optional[User]:
         """Get user by primary key id."""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT id, name, email, phone, created_at FROM users WHERE id = ?", (user_id,))
+        cursor.execute("SELECT id, name, email, phone, is_admin, created_at FROM users WHERE id = ?", (user_id,))
         row = cursor.fetchone()
         if not row:
             return None
@@ -326,3 +339,67 @@ class DatabaseRepository:
             found_item=found_item,
             found_reporter=found_reporter
         )
+
+    # =========================================================================
+    # 4. CLAIM OPERATIONS (Minimal SIH Claim System)
+    # =========================================================================
+    def insert_claim(self, claim: Claim) -> Claim:
+        """
+        Submit a new item ownership claim.
+        Associates claimant_id, lost_item_id, found_item_id, match_id, and status ('pending').
+        """
+        cursor = self.conn.cursor()
+        now_str = datetime.now(timezone.utc).isoformat()
+        if not claim.created_at:
+            claim.created_at = now_str
+
+        cursor.execute(
+            """
+            INSERT INTO claims (id, claimant_id, lost_item_id, found_item_id, match_id, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (claim.id, claim.claimant_id, claim.lost_item_id, claim.found_item_id, claim.match_id, claim.status, claim.created_at)
+        )
+        self.conn.commit()
+        return claim
+
+    def get_claim_by_id(self, claim_id: str) -> Optional[Claim]:
+        """Retrieve single claim by id."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT id, claimant_id, lost_item_id, found_item_id, match_id, status, created_at FROM claims WHERE id = ?",
+            (claim_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return Claim.from_dict(dict(row))
+
+    def get_claims_for_user(self, user_id: str) -> List[Claim]:
+        """Retrieve all claims submitted by a specific user (claimant)."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT id, claimant_id, lost_item_id, found_item_id, match_id, status, created_at FROM claims WHERE claimant_id = ? ORDER BY created_at DESC",
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+        return [Claim.from_dict(dict(r)) for r in rows]
+
+    def get_all_claims(self) -> List[Claim]:
+        """Retrieve all claims (for Admin/Security interface)."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT id, claimant_id, lost_item_id, found_item_id, match_id, status, created_at FROM claims ORDER BY created_at DESC"
+        )
+        rows = cursor.fetchall()
+        return [Claim.from_dict(dict(r)) for r in rows]
+
+    def update_claim_status(self, claim_id: str, new_status: str) -> Optional[Claim]:
+        """Update claim status ('pending' -> 'approved' -> 'rejected')."""
+        if new_status not in ('pending', 'approved', 'rejected'):
+            raise ValueError(f"Invalid claim status '{new_status}'. Must be 'pending', 'approved', or 'rejected'.")
+
+        cursor = self.conn.cursor()
+        cursor.execute("UPDATE claims SET status = ? WHERE id = ?", (new_status, claim_id))
+        self.conn.commit()
+        return self.get_claim_by_id(claim_id)

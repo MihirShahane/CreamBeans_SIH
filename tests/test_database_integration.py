@@ -3,8 +3,8 @@ tests/test_database_integration.py
 Automated Integration Test Suite for Person 6 (Database & Data-Integration Engineer)
 Cream Beans SIH 2026 Campus Lost & Found System
 
-Validates all 9 critical verification steps and contract constraints required by prompt:
-1. Insert user.
+Validates all critical verification steps and contract constraints required by prompt:
+1. Insert user (including is_admin flag).
 2. Insert lost item.
 3. Insert found item.
 4. Retrieve items.
@@ -13,14 +13,15 @@ Validates all 9 critical verification steps and contract constraints required by
 7. Insert match result.
 8. Update item status.
 9. Retrieve complete match information.
-10. Verify zero field-name mutation across layers.
-11. Seed dataset integrity and benchmark near-duplicate validation.
+10. Submit and manage item ownership claims (Claim system).
+11. Verify zero field-name mutation across layers.
+12. Seed dataset integrity and benchmark near-duplicate validation.
 """
 
 import unittest
 import uuid
 import os
-from database.models import User, Item, MatchResult, MatchDetails
+from database.models import User, Item, MatchResult, Claim, MatchDetails
 from database.repository import DatabaseRepository
 from database.seed_database import run_seed
 
@@ -32,12 +33,13 @@ class TestDatabaseIntegration(unittest.TestCase):
         self.repo = DatabaseRepository(db_path=":memory:")
 
     def test_01_insert_user(self):
-        """Step 1: Insert user."""
+        """Step 1: Insert user including is_admin check."""
         user = User(
             id=str(uuid.uuid4()),
             name="Test Reporter",
             email="test.reporter@nitk.edu.in",
-            phone="+91-9988776655"
+            phone="+91-9988776655",
+            is_admin=False
         )
         inserted = self.repo.insert_user(user)
         self.assertEqual(inserted.id, user.id)
@@ -47,6 +49,17 @@ class TestDatabaseIntegration(unittest.TestCase):
         self.assertEqual(fetched.name, "Test Reporter")
         self.assertEqual(fetched.email, "test.reporter@nitk.edu.in")
         self.assertEqual(fetched.phone, "+91-9988776655")
+        self.assertFalse(fetched.is_admin)
+
+        # Admin user
+        admin = self.repo.insert_user(User(
+            id=str(uuid.uuid4()),
+            name="Admin Security",
+            email="admin.security@nitk.edu.in",
+            is_admin=True
+        ))
+        fetched_admin = self.repo.get_user_by_id(admin.id)
+        self.assertTrue(fetched_admin.is_admin)
 
     def test_02_insert_lost_item(self):
         """Step 2: Insert lost item."""
@@ -62,7 +75,7 @@ class TestDatabaseIntegration(unittest.TestCase):
             type="lost",
             category="Backpacks",
             description="Black Lenovo backpack with laptop compartment",
-            image_url="https://storage.supabase.co/lostfound/lost_bag.jpg",
+            image_url="https://storage.supabase.co/item-images/lost_bag.jpg",
             location="Central Library 2nd Floor",
             latitude=13.0102,
             longitude=74.7943,
@@ -94,7 +107,7 @@ class TestDatabaseIntegration(unittest.TestCase):
             type="found",
             category="Backpacks",
             description="Black Lenovo backpack found on chair",
-            image_url="https://storage.supabase.co/lostfound/found_bag.jpg",
+            image_url="https://storage.supabase.co/item-images/found_bag.jpg",
             location="Central Library 2nd Floor",
             latitude=13.0102,
             longitude=74.7943,
@@ -132,22 +145,18 @@ class TestDatabaseIntegration(unittest.TestCase):
         """Step 5: Retrieve only active found items."""
         user = self.repo.insert_user(User(id=str(uuid.uuid4()), name="User 1", email="u1@nitk.edu.in"))
 
-        # 1. Lost item (active) -> Should NOT be returned
         self.repo.insert_item(Item(
             id=str(uuid.uuid4()), reporter_id=user.id, type="lost",
             category="Phones", description="Lost Phone", location="LHC", timestamp="2026-08-28T10:00:00Z", status="active"
         ))
-        # 2. Found item (matched) -> Should NOT be returned
         self.repo.insert_item(Item(
             id=str(uuid.uuid4()), reporter_id=user.id, type="found",
             category="Phones", description="Matched Phone", location="LHC", timestamp="2026-08-28T10:00:00Z", status="matched"
         ))
-        # 3. Found item (returned) -> Should NOT be returned
         self.repo.insert_item(Item(
             id=str(uuid.uuid4()), reporter_id=user.id, type="found",
             category="Phones", description="Returned Phone", location="LHC", timestamp="2026-08-28T10:00:00Z", status="returned"
         ))
-        # 4. Found item (active) -> SHOULD be returned!
         active_found = self.repo.insert_item(Item(
             id=str(uuid.uuid4()), reporter_id=user.id, type="found",
             category="Phones", description="Active Found Phone", location="LHC", timestamp="2026-08-28T10:00:00Z", status="active"
@@ -268,10 +277,47 @@ class TestDatabaseIntegration(unittest.TestCase):
         self.assertEqual(complete_info.found_reporter.name, "Security Guard Ramesh")
         self.assertEqual(complete_info.found_reporter.phone, "+91-9443322110")
 
-    def test_10_field_name_integrity_and_ai_contract(self):
+    def test_10_claims_workflow(self):
+        """Step 10: Submit, query, and update item ownership claims."""
+        claimant = self.repo.insert_user(User(id=str(uuid.uuid4()), name="Claimant Student", email="claimant@nitk.edu.in"))
+        reporter = self.repo.insert_user(User(id=str(uuid.uuid4()), name="Finder Security", email="finder@nitk.edu.in"))
+
+        lost_item = self.repo.insert_item(Item(
+            id=str(uuid.uuid4()), reporter_id=claimant.id, type="lost",
+            category="Water Bottles", description="Milton Bottle", location="Grounds", timestamp="2026-08-28T10:00:00Z"
+        ))
+        found_item = self.repo.insert_item(Item(
+            id=str(uuid.uuid4()), reporter_id=reporter.id, type="found",
+            category="Water Bottles", description="Milton Bottle Found", location="Grounds", timestamp="2026-08-28T10:15:00Z"
+        ))
+
+        # Submit claim
+        claim = Claim(
+            id=str(uuid.uuid4()),
+            claimant_id=claimant.id,
+            lost_item_id=lost_item.id,
+            found_item_id=found_item.id,
+            status="pending"
+        )
+        inserted_claim = self.repo.insert_claim(claim)
+        self.assertEqual(inserted_claim.status, "pending")
+
+        # Query claims for user
+        user_claims = self.repo.get_claims_for_user(claimant.id)
+        self.assertEqual(len(user_claims), 1)
+        self.assertEqual(user_claims[0].id, claim.id)
+
+        # Update claim status to approved (by Admin)
+        approved_claim = self.repo.update_claim_status(claim.id, "approved")
+        self.assertEqual(approved_claim.status, "approved")
+
+        # Invalid claim status raises error
+        with self.assertRaises(ValueError):
+            self.repo.update_claim_status(claim.id, "invalid_claim_status")
+
+    def test_11_field_name_integrity_and_ai_contract(self):
         """
-        Verification that zero field names are modified across:
-        Supabase -> FastAPI -> AI -> FastAPI -> Frontend
+        Verification that zero field names are modified across layers.
         """
         item = Item(
             id="test-id-123",
@@ -315,10 +361,9 @@ class TestDatabaseIntegration(unittest.TestCase):
         self.assertEqual(rebuilt.reporter_id, item.reporter_id)
         self.assertEqual(rebuilt.embedding, item.embedding)
 
-    def test_11_seed_dataset_benchmark_verification(self):
+    def test_12_seed_dataset_benchmark_verification(self):
         """
-        Verifies that the deterministic SIH seed dataset loads correctly and contains
-        the benchmark near-duplicate test cases.
+        Verifies that the deterministic SIH seed dataset loads correctly.
         """
         user_count, found_count, lost_count = run_seed(
             db_path="database/test_seed.db",

@@ -21,6 +21,7 @@ class User:
     name: str
     email: str
     phone: Optional[str] = None
+    is_admin: bool = False
     created_at: Optional[str] = None
 
     @classmethod
@@ -30,6 +31,7 @@ class User:
             name=str(data["name"]),
             email=str(data["email"]),
             phone=data.get("phone"),
+            is_admin=bool(data.get("is_admin", False)),
             created_at=str(data["created_at"]) if data.get("created_at") else None,
         )
 
@@ -72,10 +74,8 @@ class Item:
     created_at: Optional[str] = None
 
     def __post_init__(self):
-        # Validate strict type enum constraint
         if self.type not in ("lost", "found"):
             raise ValueError(f"Invalid item type '{self.type}'. Must be 'lost' or 'found'.")
-        # Validate strict status enum constraint
         if self.status not in ("active", "matched", "returned"):
             raise ValueError(f"Invalid item status '{self.status}'. Must be 'active', 'matched', or 'returned'.")
 
@@ -164,6 +164,40 @@ class MatchResult:
         if self.created_at:
             res["created_at"] = self.created_at
         return res
+
+
+@dataclass
+class Claim:
+    """
+    Canonical Claim representation matching Supabase 'claims' table.
+    Associates claimant, lost item, found item, optional match_id, and claim status.
+    """
+    id: str
+    claimant_id: str
+    lost_item_id: str
+    found_item_id: str
+    match_id: Optional[str] = None
+    status: str = "pending"  # 'pending' | 'approved' | 'rejected'
+    created_at: Optional[str] = None
+
+    def __post_init__(self):
+        if self.status not in ("pending", "approved", "rejected"):
+            raise ValueError(f"Invalid claim status '{self.status}'. Must be 'pending', 'approved', or 'rejected'.")
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Claim":
+        return cls(
+            id=str(data["id"]),
+            claimant_id=str(data["claimant_id"]),
+            lost_item_id=str(data["lost_item_id"]),
+            found_item_id=str(data["found_item_id"]),
+            match_id=str(data["match_id"]) if data.get("match_id") else None,
+            status=str(data.get("status", "pending")),
+            created_at=str(data["created_at"]) if data.get("created_at") else None,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
